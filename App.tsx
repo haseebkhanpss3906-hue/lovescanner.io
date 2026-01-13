@@ -40,32 +40,27 @@ const App: React.FC = () => {
     });
 
     let category = "Unknown";
-    let colorClass = "bg-neutral-500";
     let accentGradient = "from-neutral-500 to-neutral-700";
     let glowColor = "rgba(115, 115, 115, 0.2)";
     let description = "";
 
     if (scaledScore >= 85) {
       category = "Resilient & Secure";
-      colorClass = "bg-green-500";
       accentGradient = "from-green-400 to-emerald-600";
       glowColor = "rgba(52, 211, 153, 0.3)";
       description = "Your connection is characterized by high mutual trust and emotional availability. You have a fortress of security.";
     } else if (scaledScore >= 70) {
       category = "Stable & Growing";
-      colorClass = "bg-emerald-400";
       accentGradient = "from-emerald-400 to-cyan-600";
       glowColor = "rgba(52, 211, 153, 0.2)";
       description = "A solid foundation exists. You are in a 'green zone', but proactive maintenance will keep the structure robust.";
     } else if (scaledScore >= 50) {
       category = "Vulnerable & Precarious";
-      colorClass = "bg-yellow-500";
       accentGradient = "from-yellow-400 to-orange-500";
       glowColor = "rgba(251, 191, 36, 0.2)";
       description = "Frequent disconnects or repair failures are stressing the relationship fabric. Attention is required to prevent deeper cracks.";
     } else {
       category = "High Alert & Insecure";
-      colorClass = "bg-red-500";
       accentGradient = "from-red-500 to-rose-700";
       glowColor = "rgba(239, 68, 68, 0.3)";
       description = "Significant attachment wounds or chronic conflict patterns require urgent attention. The system is under critical stress.";
@@ -77,7 +72,7 @@ const App: React.FC = () => {
     setResult({
       category,
       score: scaledScore,
-      colorClass,
+      colorClass: '', // Legacy field
       description,
       advice: "See deep analysis below.",
       sectionScores,
@@ -89,17 +84,27 @@ const App: React.FC = () => {
     setIsGeneratingReport(false);
   }, [answers, userName]);
 
+  // THIS IS THE ONLY PLACE WE ASK FOR CAMERA/MIC PERMISSIONS
   const startRecordingFlow = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      // Browser will only prompt the user here after they click "Yes, Capture Reaction"
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { width: 1280, height: 720 }, 
+        audio: true 
+      });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
       setStep(AppStep.REACTION_RECORDING);
-      setCountdown(3);
+      
+      // Delay slightly to ensure video element is rendered before setting srcObject
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+        setCountdown(3);
+      }, 100);
     } catch (err) {
-      console.error("Camera access denied", err);
+      console.error("Camera or microphone access denied", err);
+      // If user denies, gracefully skip to results
       setStep(AppStep.RESULTS);
     }
   };
@@ -130,18 +135,24 @@ const App: React.FC = () => {
     const mediaRecorder = new MediaRecorder(canvasStream, { mimeType: 'video/webm' });
     const chunks: Blob[] = [];
 
-    mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
+
     mediaRecorder.onstop = () => {
       const blob = new Blob(chunks, { type: 'video/webm' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Love-Scanner-Reaction-${userName}.webm`;
+      a.download = `Love-Scanner-Reaction-${userName || 'Anonymous'}.webm`;
       a.click();
-      setStep(AppStep.RESULTS);
+      
+      // Clean up stream tracks immediately after recording ends
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current = null;
       }
+      setStep(AppStep.RESULTS);
     };
 
     mediaRecorder.start();
@@ -151,7 +162,7 @@ const App: React.FC = () => {
     const duration = 15000;
 
     const drawFrame = () => {
-      if (mediaRecorder.state === 'inactive') return;
+      if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
       
       const elapsed = Date.now() - startTime;
       const remaining = Math.max(0, 15 - Math.floor(elapsed / 1000));
@@ -162,10 +173,15 @@ const App: React.FC = () => {
         return;
       }
 
-      ctx?.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      // Draw Overlay
-      if (ctx) {
+      if (ctx && video) {
+        // Draw mirror video
+        ctx.save();
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        ctx.restore();
+        
+        // Draw Overlay Graphics
         ctx.fillStyle = 'white';
         ctx.font = 'bold 80px Inter, Arial, sans-serif';
         ctx.textAlign = 'center';
@@ -178,10 +194,11 @@ const App: React.FC = () => {
 
         ctx.shadowBlur = 0;
         // REC indicator
-        ctx.fillStyle = 'red';
+        ctx.fillStyle = '#ef4444';
         ctx.beginPath();
         ctx.arc(60, 60, 15, 0, Math.PI * 2);
         ctx.fill();
+        
         ctx.fillStyle = 'white';
         ctx.font = 'bold 24px Inter, Arial, sans-serif';
         ctx.textAlign = 'left';
@@ -202,18 +219,15 @@ const App: React.FC = () => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Background Base
     ctx.fillStyle = '#050505';
     ctx.fillRect(0, 0, 1200, 630);
 
-    // Dynamic Mesh Gradient Effect on Canvas
     const bgGrad = ctx.createRadialGradient(600, 315, 0, 600, 315, 800);
     bgGrad.addColorStop(0, '#0a0a0a');
     bgGrad.addColorStop(1, '#000000');
     ctx.fillStyle = bgGrad;
     ctx.fillRect(0, 0, 1200, 630);
 
-    // Accent glow based on category
     const accentGrad = ctx.createRadialGradient(1000, 100, 0, 1000, 100, 500);
     if (result.score >= 70) {
         accentGrad.addColorStop(0, 'rgba(16, 185, 129, 0.15)');
@@ -226,7 +240,6 @@ const App: React.FC = () => {
     ctx.fillStyle = accentGrad;
     ctx.fillRect(0, 0, 1200, 630);
 
-    // Branding Header
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 20px Inter, Arial, sans-serif';
     ctx.letterSpacing = "4px";
@@ -237,7 +250,6 @@ const App: React.FC = () => {
     ctx.letterSpacing = "2px";
     ctx.fillText('STABILITY & ATTACHMENT DIAGNOSTIC', 280, 80);
 
-    // Separator line
     ctx.strokeStyle = 'rgba(255,255,255,0.1)';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -245,33 +257,28 @@ const App: React.FC = () => {
     ctx.lineTo(1120, 110);
     ctx.stroke();
 
-    // User Profile
     ctx.fillStyle = '#666666';
     ctx.font = 'bold 16px Inter, Arial, sans-serif';
     ctx.letterSpacing = "1px";
     ctx.fillText(`PROFILE PREPARED FOR: ${userName.toUpperCase()}`, 80, 150);
 
-    // Main Score Display
     ctx.fillStyle = '#ffffff';
     ctx.font = '900 180px Inter, Arial, sans-serif';
     ctx.letterSpacing = "-5px";
     ctx.fillText(`${result.score}%`, 80, 320);
 
-    // Score Label
     ctx.fillStyle = 'rgba(255,255,255,0.3)';
     ctx.font = 'bold 20px Inter, Arial, sans-serif';
     ctx.letterSpacing = "2px";
     ctx.fillText('STABILITY INDEX', 550, 240);
 
-    // Category Label
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 60px Inter, Arial, sans-serif';
     ctx.letterSpacing = "-2px";
     ctx.fillText(result.category.toUpperCase(), 80, 390);
 
-    // Dimensional Bar
     ctx.fillStyle = '#111111';
-    if (ctx.roundRect) ctx.roundRect(80, 440, 1040, 12, 6); else ctx.fillRect(80, 440, 1040, 12);
+    ctx.roundRect ? ctx.roundRect(80, 440, 1040, 12, 6) : ctx.fillRect(80, 440, 1040, 12);
     ctx.fill();
 
     const barGrad = ctx.createLinearGradient(80, 0, 1120, 0);
@@ -280,10 +287,9 @@ const App: React.FC = () => {
     barGrad.addColorStop(1, '#10b981');
     ctx.fillStyle = barGrad;
     const barWidth = Math.max(20, (result.score / 100) * 1040);
-    if (ctx.roundRect) ctx.roundRect(80, 440, barWidth, 12, 6); else ctx.fillRect(80, 440, barWidth, 12);
+    ctx.roundRect ? ctx.roundRect(80, 440, barWidth, 12, 6) : ctx.fillRect(80, 440, barWidth, 12);
     ctx.fill();
 
-    // Description
     ctx.fillStyle = '#aaaaaa';
     ctx.font = '300 24px Inter, Arial, sans-serif';
     const words = result.description.split(' ');
@@ -302,7 +308,6 @@ const App: React.FC = () => {
     }
     ctx.fillText(line, 80, y);
 
-    // Domain & Disclaimer
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 16px Inter, Arial, sans-serif';
     ctx.letterSpacing = "1px";
@@ -315,7 +320,6 @@ const App: React.FC = () => {
     ctx.letterSpacing = "1px";
     ctx.fillText('THIS IS A DIAGNOSTIC INSIGHT ONLY. NOT PROFESSIONAL CLINICAL ADVICE.', 80, 600);
 
-    // Trigger Download
     const link = document.createElement('a');
     link.download = `Love-Scanner-Summary-${userName || 'Profile'}.png`;
     link.href = canvas.toDataURL('image/png');
@@ -367,6 +371,7 @@ const App: React.FC = () => {
     setDeepReport('');
     if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
     }
   };
 
@@ -572,7 +577,7 @@ const App: React.FC = () => {
           Would you like to record a <span className="text-white font-bold">15-second reaction video</span> of your final stability score?
         </p>
         <p className="text-sm text-neutral-500 italic">
-          The video will be saved locally to your device and your score will be embedded in the frame.
+          Camera and microphone access will be requested only if you choose to record. The video stays on your device.
         </p>
         <div className="grid grid-cols-2 gap-4">
           <button 
@@ -609,7 +614,6 @@ const App: React.FC = () => {
           className="hidden"
         />
         
-        {/* Countdown Overlay */}
         {countdown !== null && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/60 backdrop-blur-sm z-50">
             <div className="text-9xl font-black text-white animate-ping">
@@ -618,7 +622,6 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Recording Overlay UI */}
         {countdown === null && (
             <div className="absolute inset-0 pointer-events-none p-10 flex flex-col justify-between">
                 <div className="flex justify-between items-start">
@@ -642,7 +645,7 @@ const App: React.FC = () => {
 
       <div className="text-center space-y-2">
         <h3 className="text-2xl font-black tracking-tighter text-white/80">REACTION EVIDENCE CAPTURE</h3>
-        <p className="text-neutral-500 text-[10px] uppercase tracking-[0.5em] font-bold">Subject: {userName}</p>
+        <p className="text-neutral-500 text-[10px] uppercase tracking-[0.5em] font-bold">Subject: {userName || 'Anonymous'}</p>
       </div>
     </div>
   );
